@@ -1,16 +1,16 @@
 // Issue 04: refuse opencode 1.x with a copy-paste upgrade command.
 // Seam 1 (unit): version parsing + upgrade message in opencode.mjs.
 // Seam 2 (live): server.mjs refuses an opencode run before spawning when pointed at a 1.x binary.
-// Run with: node --test tests/verify-opencode-v1-refusal.mjs
+// Run with: node --test tests/opencode/verify-opencode-v1-refusal.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, chmod, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { majorOf, needsUpgradeVersion, upgradeMessage, info } from '../opencode.mjs';
+import { majorOf, needsUpgradeVersion, upgradeMessage, info } from '../../opencode.mjs';
 
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
 // ---------- seam 1: version parsing ----------
 test('1.x versions need an upgrade, 2.x do not', () => {

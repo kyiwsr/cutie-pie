@@ -1,4 +1,4 @@
-// Issue 03: V2 event translation. Run with: node tests/verify-opencode-events.mjs
+// Issue 03: V2 event translation. Run with: node tests/opencode/verify-opencode-events.mjs
 // Unit seam: translate()/finish()/newState() in opencode.mjs, fed with real
 // captured V2 `opencode run --format json` lines. Live seam: the server.mjs
 // close handler, driven through a real server + real binary (needs network
@@ -9,9 +9,9 @@ import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { newState, translate, finish } from '../opencode.mjs';
+import { newState, translate, finish } from '../../opencode.mjs';
 
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
 // ---------- captured V2 fixtures (opencode 2.0.29, `run --format json`) ----------
 const V2_DENY_READ = '{"type":"tool_use","timestamp":1791984225976,"sessionID":"ses_askread","part":{"partID":"prt_x","sessionID":"ses_askread","messageID":"msg_x","type":"tool","id":"call_1","tool":"read","state":{"status":"error","input":{"path":"/tmp/opencode/v2probe/hello.txt"},"error":"This non-interactive run cannot ask the user for permission, so the request was rejected. Continue without this action.","metadata":{},"time":{"start":1,"end":2}}}}';
