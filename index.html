@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cutie Pie</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap" rel="stylesheet">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { background: #14161a; color: #f4f1ea; font: 15px/1.5 'Pixelify Sans', ui-monospace, monospace; overflow: hidden; }
+  :root { --topbar: 76px; }
+  .stage { position: fixed; inset: var(--topbar) 0 0 0; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; }
+  .game { line-height: 0; position: relative; }
+  .names { position: absolute; inset: 0; pointer-events: none; overflow: hidden; line-height: 1.2; }
+  .name { position: absolute; left: 0; top: 0; padding: 1px 6px; border-radius: 6px; background: rgba(20, 22, 26, .78); color: #fff; font-weight: 600; white-space: nowrap; will-change: transform; }
+  .game canvas { display: block; width: 100% !important; height: 100% !important; image-rendering: pixelated; }
+  .bubble { position: absolute; left: 0; top: 0; max-width: 17em; padding: 6px 10px; border-radius: 10px; background: #fff; color: #14161a; border: 2px solid #14161a; font-size: .9em; line-height: 1.3; overflow-wrap: anywhere; will-change: transform; }
+  .bubble.think { border-style: dashed; color: #3a4150; background: #fdfbf3; }
+  .bubble::after { content: ''; position: absolute; width: 8px; height: 8px; background: inherit; border: 2px solid #14161a; transform: rotate(45deg); }
+  .bubble.up::after { left: calc(50% - 6px); bottom: -7px; border-top: 0; border-left: 0; }
+  .bubble.left::after { right: -7px; top: calc(50% - 6px); border-bottom: 0; border-left: 0; }
+  .bubble.think::after { border-style: dashed; }
+  #topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--topbar); display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 14px; padding: 0 20px; background: #ffffff; color: #14161a; border-bottom: 1px solid #e4e4e4; z-index: 2; }
+  #topbar h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: .02em; }
+  #topright { display: flex; align-items: center; justify-content: flex-end; gap: 14px; min-width: 0; }
+  #topconn { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+  .chip { flex: none; width: 34px; height: 34px; border-radius: 8px; object-fit: cover; display: grid; place-items: center; background: #f1f2f4; border: 1px solid #e4e4e4; font-size: 12px; font-weight: 700; color: #14161a; cursor: default; }
+  .chip.st-needs-auth, .chip.st-pending, .chip.st-failed { opacity: .4; filter: grayscale(1); }
+  #topbar button { font: inherit; font-size: 14px; padding: 5px 10px; border-radius: 6px; border: 1px solid #c9ced6; background: #fff; color: #14161a; cursor: pointer; white-space: nowrap; }
+  #topbar button:focus-visible { outline: 2px solid #14161a; outline-offset: 2px; }
+  dialog button:focus-visible, #mform :focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+  .tm-usage { display: flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .14em; font-weight: 700; color: #5b6270; white-space: nowrap; }
+  .tm-usage b { font-size: 15px; letter-spacing: 0; color: #14161a; font-variant-numeric: tabular-nums; }
+  .tm-usage .ub { width: 46px; height: 4px; border-radius: 99px; background: rgba(20,22,26,.14); overflow: hidden; }
+  .tm-usage .ub i { display: block; height: 100%; background: #14161a; border-radius: 99px; }
+  .tm-usage .ub i.w { background: #b4830b; } .tm-usage .ub i.c { background: #b4391e; }
+  .tm-usage.off { opacity: .8; }
+  #chatWrap { position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); width: min(640px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; z-index: 3; }
+  #chat { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #e4e4e4; border-radius: 14px; padding: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+  #chat select, #chat input, #chat button { font: inherit; font-size: 15px; border-radius: 8px; border: 1px solid #c9ced6; background: #fff; color: #14161a; padding: 8px 10px; }
+  #chat select[hidden] { display: none; }
+  #chat input { flex: 1; min-width: 0; }
+  #chat button { background: #14161a; border-color: #14161a; color: #fff; cursor: pointer; }
+  #chat button:disabled, #chat input:disabled { opacity: .5; cursor: default; }
+  #chat :focus-visible, #convo :focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+  #chatWrap[hidden], #convo[hidden] { display: none; }
+  #convo { position: fixed; left: 16px; top: calc(var(--topbar) + 16px); bottom: 16px; width: min(500px, calc(100vw - 32px)); z-index: 3; display: flex; flex-direction: column; background: #fff; color: #14161a; border: 1px solid #e4e4e4; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.35); overflow: hidden; }
+  #convoHead { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 16px; border-bottom: 1px solid #e4e4e4; }
+  #convoHead h2 { margin: 0; font-size: 16px; flex: 1; }
+  #convo select, #convo input, #convo button { font: inherit; font-size: 14px; border-radius: 8px; border: 1px solid #c9ced6; background: #fff; color: #14161a; padding: 6px 10px; }
+  #convo select[hidden] { display: none; }
+  #convo button { cursor: pointer; }
+  #convo #convoMin { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; font-size: 22px; line-height: 1; background: #14161a; border-color: #14161a; color: #fff; }
+  #convoLog { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  #convoLog .msg { max-width: 88%; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+  #convoLog .you { align-self: flex-end; background: #14161a; color: #fff; border-bottom-right-radius: 4px; }
+  #convoLog .reply { align-self: flex-start; background: #f1f2f4; border-bottom-left-radius: 4px; }
+  #convoLog .tool { align-self: flex-start; font-size: 12px; color: #5b6270; padding: 0 4px; }
+  #convoLog .err { align-self: flex-start; background: #fbe9e6; color: #b3372b; }
+  #convoLog .handoff { align-self: flex-start; max-width: 88%; padding: 6px 10px; border-radius: 8px; background: #e8efff; color: #1d3a8a; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #convoLog .wait { align-self: flex-start; color: #5b6270; font-size: 13px; padding: 0 4px; }
+  #convoForm { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #e4e4e4; }
+  #convoForm input { flex: 1; min-width: 0; }
+  #convoForm button { background: #14161a; border-color: #14161a; color: #fff; }
+  #convo button:disabled, #convo input:disabled { opacity: .5; cursor: default; }
+  #topbar #logoutBtn { background: #c0291b; border-color: #c0291b; color: #fff; font-weight: 600; }
+  #topbar #logoutBtn[hidden] { display: none; }
+  #logoutConfirm { width: min(420px, calc(100vw - 32px)); }
+  #logoutConfirm p { margin: 0 0 16px; font-size: 14px; color: #3a4150; }
+  dialog button.red { background: #c0291b; border-color: #c0291b; color: #fff; }
+  #loginPage { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: #fff; color: #14161a; padding: 16px; }
+  #loginPage[hidden] { display: none; }
+  .logincard { width: min(420px, 100%); text-align: center; }
+  .logincard h1 { margin: 0 0 12px; font-size: 44px; font-weight: 600; letter-spacing: .02em; }
+  #loginMsg { margin: 0 0 20px; font-size: 16px; color: #3a4150; }
+  #loginMsg.bad { color: #b3372b; }
+  .logincard button { font: inherit; font-size: 16px; padding: 10px 22px; border-radius: 10px; border: 1px solid #14161a; background: #14161a; color: #fff; cursor: pointer; }
+  .logincard button:disabled { opacity: .5; cursor: default; }
+  .logincard button.plain { background: #fff; color: #14161a; border-color: #c9ced6; }
+  .logincard button:focus-visible, .logincard a:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+  #loginWait { display: flex; flex-direction: column; align-items: center; gap: 12px; font-size: 14px; color: #3a4150; }
+  #loginWait[hidden], #loginBtn[hidden], #loginSkip[hidden], #loginLink[hidden] { display: none; }
+  #loginSkip { display: block; margin: 12px auto 0; font-size: 14px; }
+  #loginWait p { margin: 0; }
+  #loginLink { color: #2563eb; }
+  .loginnote { margin: 28px 0 0; font-size: 12px; color: #5b6270; }
+  @media (max-width: 900px) { #topusage { display: none; } }
+  dialog { position: relative; overflow: visible; background: #ffffff; color: #14161a; border: 1px solid #e4e4e4; border-radius: 12px; padding: 20px; width: min(560px, calc(100vw - 32px)); }
+  #mbody { max-height: calc(100vh - 80px); overflow-y: auto; }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog h2 { margin: 0 0 12px; font-size: 16px; }
+  dialog button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 6px; border: 1px solid #c9ced6; background: #fff; color: #14161a; cursor: pointer; }
+  dialog button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+  dialog button.danger { color: #b3372b; }
+  .arow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #e4e4e4; }
+  .ainfo { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .ainfo span { font-size: 12px; color: #5b6270; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #mform { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  #mform[hidden], #mform label[hidden] { display: none; }
+  dialog.editing #mlist, dialog.editing #mfoot { display: none; }
+  dialog.editing #mform { margin-top: 0; }
+  #mform label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #5b6270; }
+  #mform input, #mform textarea, #mform select { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 6px; border: 1px solid #c9ced6; background: #fff; color: #14161a; }
+  #mform textarea { min-height: 90px; resize: vertical; }
+  .hint { font-size: 12px; color: #5b6270; min-height: 0; }
+  .hint:empty { display: none; }
+  .hint.bad { color: #b3372b; }
+  .mrow { display: flex; gap: 10px; }
+  .mrow label { flex: 1; min-width: 0; }
+  .trow { display: flex; align-items: center; gap: 10px; }
+  #mtoolsBtn[aria-expanded="true"] { background: #14161a; border-color: #14161a; color: #fff; }
+  #mtoolsCount { font-size: 12px; color: #5b6270; }
+  #mtoolsCard { position: absolute; top: 0; left: calc(100% + 12px); width: 340px; background: #fff; border: 1px solid #e4e4e4; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.35); overflow: hidden; }
+  #mtoolsCard[hidden] { display: none; }
+  #mtoolsHead { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 10px 16px; border-bottom: 1px solid #e4e4e4; }
+  #mtoolsHead h2 { margin: 0; }
+  @media (max-width: 960px) { #mtoolsCard { position: static; width: auto; margin-top: 12px; box-shadow: none; } }
+  #mtoolList label { display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 5px 12px; font-size: 14px; color: #14161a; border-top: 1px solid #e4e4e4; cursor: pointer; }
+  #mtoolList label b { flex: none; min-width: 108px; font-weight: 600; }
+  #mtoolList label span { min-width: 0; font-size: 12px; color: #5b6270; }
+  #mtoolList label:first-child { border-top: 0; }
+  #mtoolList label:hover { background: #f1f2f4; }
+  #mtoolList input { width: 16px; height: 16px; padding: 0; margin: 0; accent-color: #14161a; }
+  .mbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  #merr { color: #b3372b; font-size: 13px; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<header id="topbar">
+  <h1>Cutie Pie</h1>
+  <div id="topconn"></div>
+  <div id="topright">
+  <button id="topManage" type="button" title="add, edit and delete agents">⚙ Manage Agents</button>
+  <div id="topusage" class="tm-usage off"></div>
+  <button id="logoutBtn" type="button" hidden>Log out</button>
+  </div>
+</header>
+<dialog id="manage" aria-labelledby="mtitle">
+<div id="mbody">
+  <h2 id="mtitle">Manage Agents</h2>
+  <div id="mlist"></div>
+  <form id="mform" hidden>
+    <h2 id="mformTitle">New agent</h2>
+    <label>Name<input name="name" maxlength="40" required></label>
+    <label>Role<select id="mpresets"></select></label>
+    <label id="motherRow" hidden>Your role<input id="mother" maxlength="80" placeholder="e.g. Marketing strategist"></label>
+    <label>System prompt<textarea name="role" placeholder="Describe what this agent does and how it should behave" required></textarea></label>
+    <label>Provider<select name="provider"><option value="claude">Claude (needs a Claude login)</option><option value="opencode">opencode (free models available)</option></select></label>
+    <div class="mrow">
+      <label>Model<select name="model"></select></label>
+      <label>Thinking level<select name="effort"><option value="">Default</option><option value="low">Low (quickest)</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max (deepest)</option></select></label>
+    </div>
+    <div id="mhint" class="hint" aria-live="polite"></div>
+    <div class="trow"><button type="button" id="mtoolsBtn" aria-expanded="false" aria-controls="mtoolsCard">Check allowed tools</button><span id="mtoolsCount"></span></div>
+    <div id="merr" role="alert"></div>
+    <div class="mbtns"><button type="button" id="mcancel">Cancel</button><button type="submit" class="primary">Save</button></div>
+  </form>
+  <div class="mbtns" id="mfoot"><button type="button" id="mnew">+ New agent</button><button type="button" id="mclose">Close</button></div>
+</div>
+<aside id="mtoolsCard" aria-label="Allowed tools" hidden>
+  <div id="mtoolsHead"><h2>Allowed tools</h2><button type="button" id="mtoolsDone">Done</button></div>
+  <div id="mtoolList"></div>
+</aside>
+</dialog>
+<dialog id="logoutConfirm" aria-labelledby="lcTitle">
+  <h2 id="lcTitle">Log out of Claude?</h2>
+  <p id="lcText">This signs Claude Code out on this whole computer, including your terminal. You can log back in from this page.</p>
+  <div class="mbtns"><button type="button" id="logoutCancel">Cancel</button><button type="button" id="logoutGo" class="red">Log out</button></div>
+</dialog>
+<div id="loginPage" hidden role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+  <div class="logincard">
+    <h1 id="loginTitle">Cutie Pie</h1>
+    <p id="loginMsg" role="status">You are signed out of Claude.</p>
+    <button id="loginBtn" type="button">Log in with Claude</button>
+    <button id="loginSkip" type="button" class="plain">Continue without Claude (use opencode)</button>
+    <div id="loginWait" hidden>
+      <p>Finish signing in in the browser window that opened. This page carries on by itself.</p>
+      <a id="loginLink" target="_blank" rel="noopener" hidden>No window opened? Open the sign-in page</a>
+      <button id="loginCancel" type="button" class="plain">Cancel</button>
+    </div>
+    <p class="loginnote">Signing in happens on Anthropic's own page. Cutie Pie never sees your password. opencode's free models need no Claude account.</p>
+  </div>
+</div>
+<section class="stage" data-theme="castle" aria-label="Castle">
+  <div class="game"></div>
+</section>
+<div id="chatWrap">
+  <form id="chat" autocomplete="off">
+    <select id="chatAgent" aria-label="Agent" hidden></select>
+    <input id="chatIn" placeholder="Message your agent…" aria-label="Message">
+    <button id="chatSend" type="submit">Send</button>
+  </form>
+</div>
+<aside id="convo" aria-label="Chat" hidden>
+  <div id="convoHead">
+    <h2>Chat</h2>
+    <select id="convoAgent" aria-label="Agent" hidden></select>
+    <button id="convoMin" type="button" aria-label="Minimize chat" title="Minimize">×</button>
+  </div>
+  <div id="convoLog" aria-live="polite"></div>
+  <form id="convoForm" autocomplete="off">
+    <input id="convoIn" placeholder="Message your agent…" aria-label="Message">
+    <button id="convoSend" type="submit">Send</button>
+  </form>
+</aside>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
+<script src="/office.js"></script>
+<script src="/topbar.js"></script>
+<script src="/chat.js"></script>
+<script src="/auth.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Personal to each person's copy
+agents.json
+.usage-cache.json
+workspace/
+CONTEXT.md
+
+# Pages the agents write into the project folder (only index.html belongs to the app)
+/*.html
+!/index.html
+
+# Installed or downloaded
+node_modules/
+tools/
+
+# Third-party brand logos for the connector strip: add your own PNGs here (see README)
+logos/*.png

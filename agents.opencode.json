@@ -1,0 +1,34 @@
+[
+  {
+    "id": "master",
+    "name": "Master",
+    "role": "You are MASTER, the coordinator. You never do tasks yourself: you understand each request, choose the most suitable teammate, and hand the task over. When the results come back, you report the outcome to the user.",
+    "tools": "Read,Glob,Grep",
+    "provider": "opencode",
+    "model": "opencode/nemotron-3-ultra-free"
+  },
+  {
+    "id": "scout",
+    "name": "Scout",
+    "role": "You are a researcher. Find and read the relevant files or sources, cross-check facts, and report your findings with where each one came from. Say clearly when something is unknown.",
+    "tools": "Read,Glob,Grep,WebFetch,WebSearch",
+    "provider": "opencode",
+    "model": "opencode/nemotron-3-ultra-free"
+  },
+  {
+    "id": "builder",
+    "name": "Builder",
+    "role": "You are a software engineer. Read the existing code before changing it, make small focused changes that match the surrounding style, and explain what you changed and why.",
+    "tools": "Read,Glob,Grep,Edit,Write",
+    "provider": "opencode",
+    "model": "opencode/nemotron-3-ultra-free"
+  },
+  {
+    "id": "checker",
+    "name": "Checker",
+    "role": "You are a code reviewer. Look for bugs, security problems and unclear code. List the issues by severity with the file and line, and suggest a fix for each. Do not rewrite code unless asked.",
+    "tools": "Read,Glob,Grep",
+    "provider": "opencode",
+    "model": "opencode/nemotron-3-ultra-free"
+  }
+]

@@ -1,0 +1,136 @@
+// opencode as a second provider next to Claude Code. An agent set to "opencode" runs through `opencode run`, and its
+// output is translated into the same events the chat already reads from Claude Code, so nothing else has to change.
+//
+// Two facts found by testing opencode 1.19:
+//  - Its free models (provider "opencode", ids ending in -free) reject a request when the bash tool is missing from it
+//    (HTTP 403 "free tier can only be used from within OpenCode"). So bash is never removed: when an agent may not use
+//    it, the tool is set to "ask", which a scripted run refuses automatically, and nothing can run.
+//  - Each agent's system prompt and permissions are passed as a config object in OPENCODE_CONFIG_CONTENT.
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+
+// Where to find the program, in order: OPENCODE_BIN; a copy in tools/opencode; one installed with `npm install -g
+// opencode-ai`; then plain `opencode` on PATH (the install script, Homebrew, Scoop and Chocolatey put it there).
+// npm's own launcher on Windows is a .cmd file that cannot be started directly, so the real program is looked up.
+const EXE = process.platform === 'win32' ? 'opencode.exe' : 'opencode';
+const npmGlobalRoots = () => [
+  process.env.APPDATA && path.join(process.env.APPDATA, 'npm', 'node_modules'),
+  path.join(path.dirname(process.execPath), 'node_modules'),
+  path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules'),
+  '/usr/local/lib/node_modules', '/opt/homebrew/lib/node_modules',
+  process.env.HOME && path.join(process.env.HOME, '.npm-global', 'lib', 'node_modules'),
+].filter(Boolean);
+
+export function binary() {
+  if (process.env.OPENCODE_BIN) return process.env.OPENCODE_BIN;
+  const local = path.join(ROOT, 'tools', 'opencode', 'node_modules', 'opencode-ai', 'bin', EXE);
+  if (existsSync(local)) return local;
+  for (const root of npmGlobalRoots()) {
+    const found = path.join(root, 'opencode-ai', 'bin', EXE);
+    if (existsSync(found)) return found;
+  }
+  return 'opencode';
+}
+
+function run(args, timeout = 30000) {
+  return new Promise((resolve) => {
+    let out = '', p;
+    const done = (code) => { clearTimeout(timer); resolve({ code, out }); };
+    const timer = setTimeout(() => { try { p.kill(); } catch {} done(-1); }, timeout);
+    try { p = spawn(binary(), args, { stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return done(-1); }
+    p.stdout.on('data', (d) => (out += d));
+    p.on('error', () => done(-1));
+    p.on('close', done);
+  });
+}
+
+// ---------- what is installed and which models are on offer ----------
+let modelCache = { at: 0, value: null };
+
+export async function info() {
+  if (modelCache.value && Date.now() - modelCache.at < 10 * 60 * 1000) return { installed: true, version: modelCache.version, models: modelCache.value };
+  const v = await run(['--version'], 15000);
+  if (v.code !== 0) return { installed: false, models: [] };
+  const m = await run(['models'], 60000);
+  const models = m.out.split('\n').map((l) => l.trim()).filter((l) => /^[\w.-]+\/\S+$/.test(l))
+    .map((id) => ({ id, free: /-free$/.test(id) || id === 'opencode/big-pickle' })); // no account needed for these
+  if (models.length) modelCache = { at: Date.now(), value: models, version: v.out.trim() };
+  return { installed: true, version: v.out.trim(), models };
+}
+
+// ---------- opencode's own connectors (MCP servers), for the top bar when working without Claude ----------
+let mcpCache = { at: 0, value: null };
+const ANSI = /\x1b\[[0-9;]*m/g;
+
+// `opencode mcp list` prints one line per server, e.g. "◇  ✓ name connected", "✗ name failed", "○ name disabled".
+export async function mcpServers() {
+  if (mcpCache.value && Date.now() - mcpCache.at < 2 * 60 * 1000) return mcpCache.value;
+  const r = await run(['mcp', 'list'], 60000);
+  const list = [];
+  for (const raw of r.out.split('\n')) {
+    const m = raw.replace(ANSI, '').replace(/\r/g, '').trim().match(/^\S+\s+\S\s+(\S+)\s+(connected|failed|disabled|needs\S*(?: \S+)?|pending)$/i);
+    if (!m) continue;
+    const word = m[2].toLowerCase();
+    list.push({ name: m[1], status: word === 'connected' ? 'connected' : word === 'failed' ? 'failed' : word === 'disabled' ? 'disabled' : word.startsWith('needs') ? 'needs-auth' : 'pending' });
+  }
+  mcpCache = { at: Date.now(), value: list };
+  return list;
+}
+
+// ---------- one agent run ----------
+// Claude Code's tool names, as the Manage Agents list shows them, mapped to opencode's permission names.
+const PERMS = {
+  read: ['Read'], list: ['Read'], glob: ['Glob'], grep: ['Grep'],
+  edit: ['Edit', 'Write'], write: ['Write'],
+  bash: ['Bash'], webfetch: ['WebFetch'], websearch: ['WebSearch'],
+  task: ['Agent'], skill: ['Skill'], todowrite: ['TodoWrite'], todoread: ['TodoWrite'],
+};
+
+export function buildRun(agent, message, session, systemText) {
+  const ticked = new Set(String(agent.tools || '').split(/,(?![^(]*\))/).map((t) => t.trim()).filter(Boolean));
+  const permission = {};
+  for (const [perm, names] of Object.entries(PERMS)) {
+    permission[perm] = names.some((n) => ticked.has(n)) ? 'allow' : perm === 'bash' ? 'ask' : 'deny';
+  }
+  if (ticked.has('Read')) permission.external_directory = 'allow'; // Claude Code's Read tool reaches outside the folder too
+  const config = { agent: { cutie: { description: agent.name, mode: 'primary', prompt: systemText, permission } } };
+  const args = ['run', '--format', 'json', '--agent', 'cutie', '-m', agent.model];
+  if (agent.effort) args.push('--variant', agent.effort);
+  if (/^ses_[A-Za-z0-9]+$/.test(session || '')) args.push('-s', session);
+  args.push('--', message);
+  return { cmd: binary(), args, env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config) } };
+}
+
+// ---------- opencode's events -> the events the chat understands ----------
+const cap = (s) => String(s || 'tool').replace(/^./, (c) => c.toUpperCase());
+const errorText = (e) => (e && e.data && e.data.message) || (e && e.name) || 'opencode failed';
+
+export function newState() { return { session: '', failed: false, sawText: false, denied: '' }; }
+
+export function translate(line, state) {
+  let j;
+  try { j = JSON.parse(line); } catch { return []; }
+  const out = [];
+  if (j.sessionID && !state.session) { state.session = j.sessionID; out.push({ type: 'system', session_id: j.sessionID }); }
+  const p = j.part || {};
+  if (j.type === 'text' && p.text) state.sawText = true;
+  if (j.type === 'tool_use' && p.state && p.state.status === 'error' && /rejected permission/i.test(String(p.state.error))) state.denied = state.denied || cap(p.tool);
+  if (j.type === 'text' && p.text) out.push({ type: 'assistant', message: { content: [{ type: 'text', text: p.text }] } });
+  else if (j.type === 'tool_use') out.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: cap(p.tool), input: (p.state && p.state.input) || {} }] } });
+  else if (j.type === 'error') { state.failed = true; out.push({ type: 'error', text: errorText(j.error) }); }
+  return out;
+}
+
+// The closing events. A scripted run refuses a tool the agent may not use and the model often just stops, so say so.
+export function finish(state) {
+  const out = [];
+  if (!state.sawText && !state.failed && state.denied) {
+    out.push({ type: 'assistant', message: { content: [{ type: 'text', text: `I am not allowed to use the ${state.denied} tool, so I could not do that. You can allow it in this agent's allowed tools.` }] } });
+  }
+  out.push({ type: 'result', session_id: state.session, is_error: false });
+  return out;
+}
