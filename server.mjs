@@ -124,10 +124,20 @@ function teamPrompt(agents, self) {
 }
 
 // An agent on opencode: same stream the page already understands, produced from opencode's own events.
-function runOpencode(agent, agents, body, res) {
+async function runOpencode(agent, agents, body, res) {
+  const write = (ev) => res.write(JSON.stringify(ev) + '\n');
+  // A 1.x binary cannot run the V2 profile, so refuse before any run starts
+  // instead of failing mysteriously mid-run.
+  const oc = await opencode.info();
+  if (oc.needsUpgrade) {
+    const text = opencode.upgradeMessage(oc.version);
+    write({ type: 'error', text });
+    write({ type: 'result', session_id: '', is_error: true, result: text });
+    write({ type: 'exit', code: 1 });
+    return res.end();
+  }
   const { cmd, args, env } = opencode.buildRun(agent, body.prompt, body.session, agent.role + teamPrompt(agents, agent));
   const state = opencode.newState();
-  const write = (ev) => res.write(JSON.stringify(ev) + '\n');
   let child, buf = '', lastErr = '';
   try {
     child = spawn(cmd, args, { cwd: WORKDIR, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -142,7 +152,7 @@ function runOpencode(agent, agents, body, res) {
     while ((i = buf.indexOf('\n')) >= 0) { feed(buf.slice(0, i)); buf = buf.slice(i + 1); }
   });
   child.stderr.on('data', (d) => { lastErr = String(d).slice(-300); });
-  child.on('error', (e) => { write({ type: 'error', text: /ENOENT/.test(e.message) ? 'opencode is not installed. Run: npm install -g opencode-ai, then restart Cutie Pie.' : e.message }); res.end(); });
+  child.on('error', (e) => { write({ type: 'error', text: /ENOENT/.test(e.message) ? 'opencode is not installed. Run: npm install -g opencode-ai@latest, then restart Cutie Pie.' : e.message }); res.end(); });
   child.on('close', (code) => {
     feed(buf);
     // A failing run reports the real text: an upstream error event if one arrived, else the captured stderr.

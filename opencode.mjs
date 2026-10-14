@@ -38,6 +38,32 @@ export function binary() {
   return 'opencode';
 }
 
+// Cutie Pie needs opencode V2: a 1.x binary cannot run the V2 profile
+// (`agents`/`system`/`permissions[]` with `--standalone`) and would fail
+// mysteriously mid-run, so runs are refused up front with this upgrade prompt.
+export const NPM_UPGRADE_CMD = 'npm install -g opencode-ai@latest';
+export const SCRIPT_UPGRADE_CMD = 'curl -fsSL https://opencode.ai/install | bash';
+export const OPENCODE_V2_DOCS = 'https://opencode.ai/v2/docs';
+
+export function majorOf(version) {
+  const m = String(version || '').match(/(?:^|\s)v?(\d+)(?:\.\d+)?(?:\.\d+)?/);
+  return m ? Number(m[1]) : null;
+}
+
+// Only a 1.x major version refuses: 2+ passes, and an unparseable version
+// fails open so a future format never blocks runs by mistake.
+export function needsUpgradeVersion(version) {
+  return majorOf(version) === 1;
+}
+
+export function upgradeMessage(version) {
+  const seen = String(version || '').trim();
+  return `This needs opencode 2, but found ${seen || 'opencode 1.x'}. Upgrade, then restart Cutie Pie:\n` +
+    `${NPM_UPGRADE_CMD}\n` +
+    `Other installs: ${SCRIPT_UPGRADE_CMD}\n` +
+    `See ${OPENCODE_V2_DOCS}`;
+}
+
 function run(args, timeout = 30000) {
   return new Promise((resolve) => {
     let out = '', p;
@@ -51,17 +77,24 @@ function run(args, timeout = 30000) {
 }
 
 // ---------- what is installed and which models are on offer ----------
-let modelCache = { at: 0, value: null };
+let modelCache = { at: 0, value: null, version: '', needsUpgrade: false };
 
 export async function info() {
-  if (modelCache.value && Date.now() - modelCache.at < 10 * 60 * 1000) return { installed: true, version: modelCache.version, models: modelCache.value };
+  if (modelCache.value && Date.now() - modelCache.at < 10 * 60 * 1000) return { installed: true, version: modelCache.version, needsUpgrade: modelCache.needsUpgrade, models: modelCache.value };
   const v = await run(['--version'], 15000);
-  if (v.code !== 0) return { installed: false, models: [] };
+  if (v.code !== 0) return { installed: false, models: [], needsUpgrade: false };
+  const version = v.out.trim();
+  const needsUpgrade = needsUpgradeVersion(version);
+  if (needsUpgrade) {
+    // Refuse up front: do not probe `models` on a 1.x binary (wrong format, slow, misleading).
+    modelCache = { at: Date.now(), value: [], version, needsUpgrade };
+    return { installed: true, version, needsUpgrade, models: [] };
+  }
   const m = await run(['models'], 60000);
   const models = m.out.split('\n').map((l) => l.trim()).filter((l) => /^[\w.-]+\/\S+$/.test(l))
     .map((id) => ({ id, free: /-free$/.test(id) || id === 'opencode/big-pickle' })); // no account needed for these
-  if (models.length) modelCache = { at: Date.now(), value: models, version: v.out.trim() };
-  return { installed: true, version: v.out.trim(), models };
+  if (models.length) modelCache = { at: Date.now(), value: models, version, needsUpgrade };
+  return { installed: true, version, needsUpgrade, models };
 }
 
 // ---------- opencode's own connectors (MCP servers), for the top bar when working without Claude ----------

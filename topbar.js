@@ -170,9 +170,14 @@ async function fillModels(selected) {
   const info = await loadOpencode();
   save.disabled = false;
   if (form.provider.value !== 'opencode') return; // the provider was changed while this loaded
+  if (info.needsUpgrade) {
+    sel.replaceChildren(new Option('opencode 1.x — upgrade needed', ''));
+    hint.className = 'hint bad'; hint.textContent = `This needs opencode 2 (found ${info.version || '1.x'}). Upgrade: npm install -g opencode-ai@latest, or curl -fsSL https://opencode.ai/install | bash (then restart Cutie Pie). See https://opencode.ai/v2/docs.`;
+    return;
+  }
   if (!info.installed || !info.models.length) {
     sel.replaceChildren(new Option('opencode is not installed', ''));
-    hint.className = 'hint bad'; hint.textContent = 'Install it with: npm install -g opencode-ai (then restart Cutie Pie). See the README.';
+    hint.className = 'hint bad'; hint.textContent = 'Install it with: npm install -g opencode-ai@latest (then restart Cutie Pie). See the README.';
     return;
   }
   const group = (label, list) => { const g = document.createElement('optgroup'); g.label = label; list.forEach((m) => g.append(new Option(m.id.replace(/^opencode\//, ''), m.id))); return g; };
