@@ -1,11 +1,13 @@
-// opencode as a second provider next to Claude Code. An agent set to "opencode" runs through `opencode run`, and its
+// opencode as a second provider next to Claude Code. An agent set to "opencode" runs through `opencode run`,
 // output is translated into the same events the chat already reads from Claude Code, so nothing else has to change.
 //
-// Two facts found by testing opencode 1.19:
-//  - Its free models (provider "opencode", ids ending in -free) reject a request when the bash tool is missing from it
-//    (HTTP 403 "free tier can only be used from within OpenCode"). So bash is never removed: when an agent may not use
-//    it, the tool is set to "ask", which a scripted run refuses automatically, and nothing can run.
-//  - Each agent's system prompt and permissions are passed as a config object in OPENCODE_CONFIG_CONTENT.
+// Two facts found by testing opencode V2:
+//  - Its free models (provider "opencode", ids ending in -free) reject a request when the shell action is missing
+//    from it (HTTP 403 "free tier can only be used from within OpenCode"). So shell is never denied: when an agent
+//    may not use it, the action is set to "ask", which a scripted run refuses automatically, and nothing can run.
+//  - Each agent's system prompt and permissions are passed as a native-V2 profile in OPENCODE_CONFIG_CONTENT
+//    (`agents` with `system` and `permissions[]`), and each run uses `--standalone` for a per-run private server,
+//    so no files are written anywhere and concurrent runs stay isolated.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -82,23 +84,23 @@ export async function mcpServers() {
 }
 
 // ---------- one agent run ----------
-// Claude Code's tool names, as the Manage Agents list shows them, mapped to opencode's permission names.
+// Claude Code's tool names, as the Manage Agents list shows them, mapped to opencode's V2 action names.
 const PERMS = {
   read: ['Read'], list: ['Read'], glob: ['Glob'], grep: ['Grep'],
   edit: ['Edit', 'Write'], write: ['Write'],
-  bash: ['Bash'], webfetch: ['WebFetch'], websearch: ['WebSearch'],
-  task: ['Agent'], skill: ['Skill'], todowrite: ['TodoWrite'], todoread: ['TodoWrite'],
+  shell: ['Bash'], webfetch: ['WebFetch'], websearch: ['WebSearch'],
+  subagent: ['Agent'], skill: ['Skill'], todowrite: ['TodoWrite'], todoread: ['TodoWrite'],
 };
 
 export function buildRun(agent, message, session, systemText) {
   const ticked = new Set(String(agent.tools || '').split(/,(?![^(]*\))/).map((t) => t.trim()).filter(Boolean));
-  const permission = {};
-  for (const [perm, names] of Object.entries(PERMS)) {
-    permission[perm] = names.some((n) => ticked.has(n)) ? 'allow' : perm === 'bash' ? 'ask' : 'deny';
+  const permissions = [];
+  for (const [action, names] of Object.entries(PERMS)) {
+    permissions.push({ action, resource: '*', effect: names.some((n) => ticked.has(n)) ? 'allow' : action === 'shell' ? 'ask' : 'deny' });
   }
-  if (ticked.has('Read')) permission.external_directory = 'allow'; // Claude Code's Read tool reaches outside the folder too
-  const config = { agent: { cutie: { description: agent.name, mode: 'primary', prompt: systemText, permission } } };
-  const args = ['run', '--format', 'json', '--agent', 'cutie', '-m', agent.model];
+  if (ticked.has('Read')) permissions.push({ action: 'external_directory', resource: '*', effect: 'allow' }); // Claude Code's Read tool reaches outside the folder too
+  const config = { agents: { cutie: { description: agent.name, mode: 'primary', system: systemText, permissions } } };
+  const args = ['run', '--standalone', '--format', 'json', '--agent', 'cutie', '-m', agent.model];
   if (agent.effort) args.push('--variant', agent.effort);
   if (/^ses_[A-Za-z0-9]+$/.test(session || '')) args.push('-s', session);
   args.push('--', message);
