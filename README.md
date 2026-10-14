@@ -2,7 +2,7 @@
 
 A pixel-art castle where your AI agents live. You give a task to **Master**, he takes the throne, picks the best agent for the job, briefs them, and the agent walks to a desk, does the work, and comes back to report. Each agent runs on **Claude Code** or on **opencode** (which has free models), and you choose per agent.
 
-![Cutie Pie](docs/screenshot.png)
+![Cutie Pie](docs/screenshot.jpg)
 
 - **Chat** with any agent from the bar at the bottom, or click a character in the castle.
 - **Master hands work over** and shows why he chose each agent.
