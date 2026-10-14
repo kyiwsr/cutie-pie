@@ -65,7 +65,7 @@ function renderList() {
   list.replaceChildren();
   agents.forEach((a) => {
     const row = el('div', 'arow');
-    const info = el('div', 'ainfo'); info.append(el('b', null, a.name), el('span', null, [a.provider === 'opencode' ? 'opencode · ' + a.model.replace(/^opencode\//, '') : a.model, a.effort && `${a.effort} thinking`, a.tools || 'no tools'].filter(Boolean).join(' · ')));
+    const info = el('div', 'ainfo'); info.append(el('b', null, a.name), el('span', null, [a.provider === 'opencode' ? 'opencode · ' + a.model.replace(/^opencode\//, '') : a.model, a.provider !== 'opencode' && a.effort && `${a.effort} thinking`, a.tools || 'no tools'].filter(Boolean).join(' · ')));
     const edit = el('button', null, 'Edit'); edit.type = 'button'; edit.onclick = () => startEdit(a);
     const del = el('button', 'danger', 'Delete'); del.type = 'button'; del.onclick = () => remove(a);
     row.append(info, edit, del); list.append(row);
@@ -89,11 +89,24 @@ const TOOL_INFO = [
 const TOOLS = TOOL_INFO.map((t) => t[0]);
 const DEFAULT_TOOLS = ['Read', 'Glob', 'Grep'];
 const toolList = $('mtoolList');
+const toolRows = {};
 TOOL_INFO.forEach(([t, desc]) => {
   const row = el('label'), box = document.createElement('input');
   box.type = 'checkbox'; box.value = t;
   row.append(box, el('b', null, t), el('span', null, desc)); toolList.append(row);
+  toolRows[t] = row;
 });
+// Tools with no V2 action: hidden for opencode so the UI never promises a
+// restriction the runtime does not enforce. Stored values are kept (see setTools/
+// getTools and extraTools) so switching back to Claude restores them.
+const NO_V2_ACTION = ['NotebookEdit', 'TodoWrite'];
+function syncToolVisibility() {
+  const opencode = form.provider.value === 'opencode';
+  NO_V2_ACTION.forEach((t) => { if (toolRows[t]) toolRows[t].style.display = opencode ? 'none' : ''; });
+  // Effort is a Claude-only setting: hide it for opencode but keep the value
+  // so switching back to Claude restores prior behavior.
+  form.effort.closest('label').hidden = opencode;
+}
 const toolsBtn = $('mtoolsBtn'), toolsCard = $('mtoolsCard'), toolsCount = $('mtoolsCount');
 const showTools = (on) => { toolsCard.hidden = !on; toolsBtn.setAttribute('aria-expanded', String(on)); };
 const updateToolCount = () => {
@@ -167,9 +180,9 @@ async function fillModels(selected) {
   sel.replaceChildren(group('Free, no account needed', free), ...(other.length ? [group('Other, from providers you signed in to', other)] : []));
   sel.disabled = false;
   sel.value = info.models.some((m) => m.id === selected) ? selected : (info.models.some((m) => m.id === RECOMMENDED_FREE) ? RECOMMENDED_FREE : info.models[0].id);
-  hint.textContent = 'Free models need no account. Thinking level depends on the model and is ignored if it has none.';
+  hint.textContent = 'Free models need no account. Thinking level is a Claude setting and is ignored by opencode runs.';
 }
-form.provider.addEventListener('change', () => fillModels(''));
+form.provider.addEventListener('change', () => { syncToolVisibility(); fillModels(''); });
 
 // Working without Claude (chosen on the login page): the form no longer offers Claude at all.
 const noClaude = () => document.body.dataset.noClaude === '1';
@@ -185,6 +198,7 @@ async function startEdit(a) {
   form.name.value = a ? a.name : ''; form.role.value = a ? a.role : ''; markPreset(form.role.value); setTools(a ? a.tools : DEFAULT_TOOLS.join(',')); form.effort.value = a ? (a.effort || '') : '';
   setProviders();
   form.provider.value = noClaude() ? 'opencode' : a && a.provider ? a.provider : 'claude';
+  syncToolVisibility();
   showTools(false); showOther(false); err.textContent = ''; form.hidden = false; dlg.classList.add('editing'); form.name.focus();
   await fillModels(a ? a.model || '' : '');
 }

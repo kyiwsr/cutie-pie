@@ -85,11 +85,14 @@ export async function mcpServers() {
 
 // ---------- one agent run ----------
 // Claude Code's tool names, as the Manage Agents list shows them, mapped to opencode's V2 action names.
+// Only V2 actions from the permissions table appear here: NotebookEdit and TodoWrite have no V2 action,
+// so they are hidden in Manage Agents for opencode and any stored values are ignored here (kept, not deleted).
+// Agent maps to the V2 subagent action (V1 called it task).
 const PERMS = {
-  read: ['Read'], list: ['Read'], glob: ['Glob'], grep: ['Grep'],
-  edit: ['Edit', 'Write'], write: ['Write'],
+  read: ['Read'], glob: ['Glob'], grep: ['Grep'],
+  edit: ['Edit', 'Write'],
   shell: ['Bash'], webfetch: ['WebFetch'], websearch: ['WebSearch'],
-  subagent: ['Agent'], skill: ['Skill'], todowrite: ['TodoWrite'], todoread: ['TodoWrite'],
+  subagent: ['Agent'], skill: ['Skill'],
 };
 
 export function buildRun(agent, message, session, systemText) {
@@ -101,7 +104,8 @@ export function buildRun(agent, message, session, systemText) {
   if (ticked.has('Read')) permissions.push({ action: 'external_directory', resource: '*', effect: 'allow' }); // Claude Code's Read tool reaches outside the folder too
   const config = { agents: { cutie: { description: agent.name, mode: 'primary', system: systemText, permissions } } };
   const args = ['run', '--standalone', '--format', 'json', '--agent', 'cutie', '-m', agent.model];
-  if (agent.effort) args.push('--variant', agent.effort);
+  // Effort is a Claude-only setting: opencode V2 has no such flag, so it is never passed.
+  // The stored value is kept untouched so switching back to Claude restores prior behavior.
   if (/^ses_[A-Za-z0-9]+$/.test(session || '')) args.push('-s', session);
   args.push('--', message);
   return { cmd: binary(), args, env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config) } };
