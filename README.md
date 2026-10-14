@@ -53,7 +53,7 @@ On Windows, use the native installer or WinGet above. Cutie Pie starts `claude` 
 
 ### Option B: opencode (free models)
 
-1. Install opencode: `npm install -g opencode-ai` (other methods are on <https://opencode.ai/docs>).
+1. Install opencode 2 or newer: `npm install -g opencode-ai@latest` (other methods are on <https://opencode.ai/v2/docs>).
 2. Restart Cutie Pie.
 3. On the login page, click **Continue without Claude (use opencode)**. If Claude Code is not installed, that is the only option shown.
 4. Open **Manage Agents**. If the first start happened without Claude, the starter team is already set to a free model. Otherwise open each agent, choose **Provider: opencode** and pick a model under **Free, no account needed**.
