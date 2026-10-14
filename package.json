@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A pixel-art castle where AI agents, run by Claude Code or opencode, take tasks from a Master and report back.",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "start": "node server.mjs --open",
     "build": "node build.mjs"

@@ -134,3 +134,5 @@ If you change something in `src/`, run `node build.mjs` to rebuild `office.js`.
 The castle, characters and effects are original pixel art drawn in code. The scene runs on [Phaser](https://phaser.io) (MIT).
 
 Claude Code and opencode are separate products with their own terms. Cutie Pie only starts them on your computer, using your own account.
+
+Cutie Pie itself is released under the [MIT License](LICENSE).
