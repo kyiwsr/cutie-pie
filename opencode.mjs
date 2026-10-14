@@ -2,9 +2,13 @@
 // output is translated into the same events the chat already reads from Claude Code, so nothing else has to change.
 //
 // Two facts found by testing opencode V2:
-//  - Its free models (provider "opencode", ids ending in -free) reject a request when the shell action is missing
+//  - Its free models (provider "opencode", ids ending in -free, plus big-pickle) reject a request when the shell action is missing
 //    from it (HTTP 403 "free tier can only be used from within OpenCode"). So shell is never denied: when an agent
 //    may not use it, the action is set to "ask", which a scripted run refuses automatically, and nothing can run.
+//  - The same free models reject a request when the read action is not allowed (same HTTP 403), even when shell is
+//    "ask". So a coordinator such as Master, which deliberately has no tools ticked because it only outputs
+//    <delegate> blocks, still gets read allowed: the system prompt already forbids it from using any tools, so the
+//    permission only satisfies the free-tier gate and changes nothing about its behavior.
 //  - Each agent's system prompt and permissions are passed as a native-V2 profile in OPENCODE_CONFIG_CONTENT
 //    (`agents` with `system` and `permissions[]`), and each run uses `--standalone` for a per-run private server,
 //    so no files are written anywhere and concurrent runs stay isolated.
@@ -128,13 +132,26 @@ const PERMS = {
   subagent: ['Agent'], skill: ['Skill'],
 };
 
+export function isFreeModel(model) {
+  const id = String(model || '');
+  return /-free$/.test(id) || id === 'opencode/big-pickle';
+}
+
 export function buildRun(agent, message, session, systemText) {
   const ticked = new Set(String(agent.tools || '').split(/,(?![^(]*\))/).map((t) => t.trim()).filter(Boolean));
+  // Free-tier gate: free models 403 unless read is allowed (verified: read-deny + shell-ask fails,
+  // read-allow without external_directory succeeds). Coordinators with no tools ticked get read allowed
+  // so they can run; their system prompt still forbids using any tools.
+  const readAllowed = ticked.has('Read') || isFreeModel(agent.model);
   const permissions = [];
   for (const [action, names] of Object.entries(PERMS)) {
+    if (action === 'read') {
+      permissions.push({ action, resource: '*', effect: readAllowed ? 'allow' : 'deny' });
+      continue;
+    }
     permissions.push({ action, resource: '*', effect: names.some((n) => ticked.has(n)) ? 'allow' : action === 'shell' ? 'ask' : 'deny' });
   }
-  if (ticked.has('Read')) permissions.push({ action: 'external_directory', resource: '*', effect: 'allow' }); // Claude Code's Read tool reaches outside the folder too
+  if (readAllowed) permissions.push({ action: 'external_directory', resource: '*', effect: 'allow' }); // Claude Code's Read tool reaches outside the folder too
   const config = { agents: { cutie: { description: agent.name, mode: 'primary', system: systemText, permissions } } };
   const args = ['run', '--standalone', '--format', 'json', '--agent', 'cutie', '-m', agent.model];
   // Effort is a Claude-only setting: opencode V2 has no such flag, so it is never passed.
