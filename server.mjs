@@ -105,19 +105,23 @@ async function manageAgents(req, res, url) {
 
 // What an agent is told about the rest of the team, and how to hand work over. The page watches replies for
 // <delegate agent="id">instruction</delegate> and sends each instruction to that agent.
-function teamPrompt(agents, self) {
+export function teamPrompt(agents, self) {
   const others = agents.filter((a) => a.id !== self.id);
   if (!others.length) return '';
   const list = others.map((a) => `- ${a.name} (id: ${a.id}): ${a.role.replace(/\s+/g, ' ').slice(0, 200)}`).join('\n');
   return '\n\nYour teammates (other agents you can hand work to):\n' + list + '\n\n' +
+    'How to hand work over: you write <delegate> blocks as plain text in your reply. ' +
+    'There is no delegation tool, MCP server, or CLI to call: just output the blocks and the page delivers each one. ' +
+    'Never say you cannot reach teammates or that no delegation tool is wired up.\n' +
     'If your role says you hand work to other agents instead of doing tasks yourself, this is mandatory: ' +
     'do NOT use any tools and do NOT do any part of the task yourself, even if you could. ' +
     'Your whole reply is the acknowledgement plus the delegate blocks, nothing else.\n' +
     'When your role tells you to hand work over:\n' +
     '1. Start with one short sentence (under 15 words) telling the user you understood the task.\n' +
-    '2. Compare your teammates\' roles and pick the one best suited to the task.\n' +
+    '2. Compare your teammates\' roles and pick the one best suited to each task.\n' +
     '3. Hand the task over with one block per task, exactly like this:\n' +
     '<delegate agent="ID" why="under 20 words: why this teammate fits and the others do not">complete instruction for that agent</delegate>\n' +
+    'For three tasks to three teammates, output three blocks, e.g. one for scout, one for builder, one for checker.\n' +
     'Use ID from the list above. Write each instruction so the agent can act without seeing this chat, but keep it brief. ' +
     'Their answers are sent back to you afterwards. ' +
     'If your role does not tell you to hand work over, just do the task yourself and ignore this.';
