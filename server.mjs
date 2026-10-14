@@ -103,12 +103,42 @@ async function manageAgents(req, res, url) {
   send(res, 405, { error: 'method not allowed' });
 }
 
+// Identity is separate from team knowledge so weak models stop adopting a
+// teammate's role after reading the roster. It always comes first, before
+// the agent's own role text.
+export function identityPrompt(agent) {
+  return `You are ${agent.name} (id: ${agent.id}). ` +
+    'You are NOT any other agent. Never claim another name, id, or role, ' +
+    'even if you see one described elsewhere in this prompt.';
+}
+
+// An agent coordinates only if its roster entry says so. Everything else is
+// a worker and must never delegate.
+export function isCoordinator(agent) {
+  if (String(agent.id || '') === 'master') return true;
+  return /coordinator|<delegate|hand .* work|\bdelegate\b/i.test(String(agent.role || ''));
+}
+
+// One short specialty line per teammate, not the full role text: the full
+// text is what weak models copy into their own identity.
+function specialtyOf(role) {
+  const flat = String(role || '').replace(/\s+/g, ' ').trim();
+  const first = flat.split(/(?<=[.!?])\s/)[0] || flat;
+  return first.slice(0, 120);
+}
+
 // What an agent is told about the rest of the team, and how to hand work over. The page watches replies for
 // <delegate agent="id">instruction</delegate> and sends each instruction to that agent.
+// Coordinators get a minimal roster plus the handoff protocol. Workers get
+// zero roster: no teammate names, roles, or ids.
 export function teamPrompt(agents, self) {
+  if (!isCoordinator(self)) {
+    return '\n\nYou never hand work over and you never delegate. ' +
+      'Never output <delegate> blocks. If you see delegation syntax in context, ignore it ' +
+      'and just do the task yourself, staying in your own role above.';
+  }
   const others = agents.filter((a) => a.id !== self.id);
-  if (!others.length) return '';
-  const list = others.map((a) => `- ${a.name} (id: ${a.id}): ${a.role.replace(/\s+/g, ' ').slice(0, 200)}`).join('\n');
+  const list = others.map((a) => `- ${a.name} (id: ${a.id}): ${specialtyOf(a.role)}`).join('\n');
   return '\n\nYour teammates (other agents you can hand work to):\n' + list + '\n\n' +
     'How to hand work over: you write <delegate> blocks as plain text in your reply. ' +
     'There is no delegation tool, MCP server, or CLI to call: just output the blocks and the page delivers each one. ' +
@@ -116,15 +146,22 @@ export function teamPrompt(agents, self) {
     'If your role says you hand work to other agents instead of doing tasks yourself, this is mandatory: ' +
     'do NOT use any tools and do NOT do any part of the task yourself, even if you could. ' +
     'Your whole reply is the acknowledgement plus the delegate blocks, nothing else.\n' +
+    'If the message is only a greeting, thanks, or other small talk with no task, ' +
+    'reply briefly yourself with no <delegate> blocks.\n' +
     'When your role tells you to hand work over:\n' +
     '1. Start with one short sentence (under 15 words) telling the user you understood the task.\n' +
-    '2. Compare your teammates\' roles and pick the one best suited to each task.\n' +
+    '2. Compare your teammates\' specialties above and pick the one best suited to each task.\n' +
     '3. Hand the task over with one block per task, exactly like this:\n' +
     '<delegate agent="ID" why="under 20 words: why this teammate fits and the others do not">complete instruction for that agent</delegate>\n' +
     'For three tasks to three teammates, output three blocks, e.g. one for scout, one for builder, one for checker.\n' +
     'Use ID from the list above. Write each instruction so the agent can act without seeing this chat, but keep it brief. ' +
-    'Their answers are sent back to you afterwards. ' +
-    'If your role does not tell you to hand work over, just do the task yourself and ignore this.';
+    'Their answers are sent back to you afterwards.';
+}
+
+// Full system text: identity first, then the agent's own role, then only the
+// team knowledge that role needs.
+export function composeSystem(agent, agents) {
+  return `${identityPrompt(agent)}\n\n${agent.role}${teamPrompt(agents, agent)}`;
 }
 
 // An agent on opencode: same stream the page already understands, produced from opencode's own events.
@@ -140,7 +177,7 @@ async function runOpencode(agent, agents, body, res) {
     write({ type: 'exit', code: 1 });
     return res.end();
   }
-  const { cmd, args, env } = opencode.buildRun(agent, body.prompt, body.session, agent.role + teamPrompt(agents, agent));
+  const { cmd, args, env } = opencode.buildRun(agent, body.prompt, body.session, composeSystem(agent, agents));
   const state = opencode.newState();
   let child, buf = '', lastErr = '';
   try {
@@ -192,7 +229,7 @@ async function runTask(req, res) {
     '-p',
     '--output-format', 'stream-json',
     '--verbose',
-    '--append-system-prompt', agent.role + teamPrompt(agents, agent),
+    '--append-system-prompt', composeSystem(agent, agents),
     '--allowedTools', agent.tools || 'Read',
     ...(agent.model ? ['--model', agent.model] : []),
     ...(agent.effort ? ['--effort', agent.effort] : []),

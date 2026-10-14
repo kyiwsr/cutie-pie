@@ -12,6 +12,8 @@ const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.ur
 const serverSrc = await readFile(path.join(ROOT, 'server.mjs'), 'utf8');
 
 const promptBody = serverSrc.slice(serverSrc.indexOf('function teamPrompt'));
+const identityBody = serverSrc.slice(serverSrc.indexOf('function identityPrompt'), serverSrc.indexOf('function teamPrompt'));
+const composeBody = serverSrc.slice(serverSrc.indexOf('function composeSystem'));
 
 test('teamPrompt states delegation is plain text, not a tool', () => {
   assert.match(promptBody, /plain text/);
@@ -38,4 +40,26 @@ test('chat still parses <delegate> blocks', async () => {
   const chatSrc = await readFile(path.join(ROOT, 'chat.js'), 'utf8');
   assert.ok(chatSrc.includes('<delegate'), 'chat.js must reference <delegate> blocks');
   assert.ok(chatSrc.includes('allowHandoff'), 'chat.js must gate handoff parsing on allowHandoff');
+});
+
+test('identity comes first and forbids adopting other roles', () => {
+  assert.match(identityBody, /NOT any other agent/);
+  assert.match(composeBody, /identityPrompt\(agent\)/);
+  assert.ok(composeBody.indexOf('identityPrompt') < composeBody.indexOf('teamPrompt'), 'identity must precede team knowledge');
+});
+
+test('workers get zero roster and never delegate', () => {
+  assert.match(promptBody, /Never output <delegate> blocks/);
+  assert.match(serverSrc, /zero roster/i);
+  assert.doesNotMatch(identityBody, /teammates/);
+});
+
+test('only the coordinator path carries a roster', () => {
+  assert.match(promptBody, /Your teammates/);
+  assert.match(promptBody, /isCoordinator/);
+});
+
+test('chat strips leaked reasoning before display', async () => {
+  const chatSrc = await readFile(path.join(ROOT, 'chat.js'), 'utf8');
+  assert.ok(chatSrc.includes('stripReasoning'), 'chat.js must strip think/reasoning leaks');
 });

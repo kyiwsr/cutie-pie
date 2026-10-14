@@ -66,6 +66,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const short = (t, n = 150) => { const s = String(t).replace(/[*#`>_]/g, '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 const HANDOFF = /<delegate\s+([^>]*?)>([\s\S]*?)<\/delegate>/g;
 const attr = (attrs, name) => (attrs.match(new RegExp(name + '="([^"]*)"')) || [])[1] || '';
+// Weak models leak chain-of-thought as <think>/<thinking>/<reasoning> blocks,
+// sometimes with only the closing tag. None of it is user-visible content.
+const stripReasoning = (s) => {
+  let out = String(s);
+  for (const tag of ['think', 'thinking', 'reasoning']) {
+    out = out.replace(new RegExp(`<${tag}[^>]*>[\\s\\S]*?<\\/${tag}>`, 'gi'), '');
+  }
+  for (const tag of ['think', 'thinking', 'reasoning']) {
+    const close = new RegExp(`<\\/${tag}>`, 'i').exec(out);
+    if (close) out = out.slice(close.index + close[0].length);
+  }
+  return out.replace(/<\/?(?:think|thinking|reasoning)[^>]*>/gi, '');
+};
 const MAX_ROUNDS = 3; // how many times an agent may hand work out and get answers back in one request
 
 // Runs one agent and shows its reply in its own chat. Resolves with its text and any hand-offs it asked for.
@@ -84,11 +97,12 @@ async function runAgent(agentId, prompt, { label = prompt, labelCls = 'you', all
     else if (ev.type === 'assistant') {
       for (const c of ev.message.content) {
         if (c.type === 'text') {
-          text += c.text + '\n';
+          text += stripReasoning(c.text) + '\n';
           const before = handoffs.length;
+          const clean = stripReasoning(c.text);
           const visible = allowHandoff
-            ? c.text.replace(HANDOFF, (_, attrs, task) => { handoffs.push({ to: attr(attrs, 'agent'), why: attr(attrs, 'why'), task: task.trim() }); return ''; }).trim()
-            : c.text;
+            ? clean.replace(HANDOFF, (_, attrs, task) => { handoffs.push({ to: attr(attrs, 'agent'), why: attr(attrs, 'why'), task: task.trim() }); return ''; }).trim()
+            : clean;
           if (visible) { add(agentId, visible, 'reply'); shown += visible + '\n'; }
           handoffs.slice(before).forEach((h) => {
             if (h.why) add(agentId, `Chose ${nameOf(h.to)}: ${h.why}`, 'handoff');
