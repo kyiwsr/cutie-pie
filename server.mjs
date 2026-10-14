@@ -145,7 +145,10 @@ function runOpencode(agent, agents, body, res) {
   child.on('error', (e) => { write({ type: 'error', text: /ENOENT/.test(e.message) ? 'opencode is not installed. Run: npm install -g opencode-ai, then restart Cutie Pie.' : e.message }); res.end(); });
   child.on('close', (code) => {
     feed(buf);
-    if (code !== 0 && !state.failed) write({ type: 'error', text: lastErr.trim() || `opencode stopped with code ${code}` });
+    // A failing run reports the real text: an upstream error event if one arrived, else the captured stderr.
+    // Either way a non-zero exit fails the run, so the closing result reads as an error, not a success.
+    if (code !== 0 && !state.error) state.error = lastErr.trim() || `opencode stopped with code ${code}`;
+    if (code !== 0) state.failed = true;
     opencode.finish(state).forEach(write);
     write({ type: 'exit', code });
     res.end();

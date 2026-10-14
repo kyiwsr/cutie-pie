@@ -112,10 +112,32 @@ export function buildRun(agent, message, session, systemText) {
 }
 
 // ---------- opencode's events -> the events the chat understands ----------
+// V2 tool names are opencode actions (read, shell, subagent, …); the guidance below names them in the Manage Agents
+// (Claude Code) vocabulary the checkboxes use, so report the checkbox name, not the raw action.
 const cap = (s) => String(s || 'tool').replace(/^./, (c) => c.toUpperCase());
-const errorText = (e) => (e && e.data && e.data.message) || (e && e.name) || 'opencode failed';
+const checkboxName = (t) => {
+  const s = String(t || 'tool');
+  for (const names of Object.values(PERMS)) {
+    const hit = names.find((n) => n.toLowerCase() === s.toLowerCase());
+    if (hit) return hit;
+  }
+  for (const [action, names] of Object.entries(PERMS)) {
+    if (action === s.toLowerCase()) return names[0];
+  }
+  return cap(s);
+};
+// V2 error events carry { error: { type, message } }; keep the V1 fallbacks so old lines never go blank.
+const errorText = (e) => {
+  if (!e) return 'opencode failed';
+  if (typeof e === 'string') return e;
+  return e.message || (e.data && e.data.message) || e.name || 'opencode failed';
+};
+// A scripted run cannot approve an "ask" permission, so V2 rejects the tool call with this wording (V1 said
+// "rejected permission"). Either wording records the denial for the closing guidance. Kept narrow on purpose:
+// a tool's own OS errors (e.g. EACCES "permission denied") are not policy denials and must not match.
+const DENIED_RE = /rejected permission|request was rejected|cannot ask the user for permission/i;
 
-export function newState() { return { session: '', failed: false, sawText: false, denied: '' }; }
+export function newState() { return { session: '', failed: false, sawText: false, denied: '', error: '', unwarnedEventTypes: [] }; }
 
 export function translate(line, state) {
   let j;
@@ -124,19 +146,30 @@ export function translate(line, state) {
   if (j.sessionID && !state.session) { state.session = j.sessionID; out.push({ type: 'system', session_id: j.sessionID }); }
   const p = j.part || {};
   if (j.type === 'text' && p.text) state.sawText = true;
-  if (j.type === 'tool_use' && p.state && p.state.status === 'error' && /rejected permission/i.test(String(p.state.error))) state.denied = state.denied || cap(p.tool);
+  if (j.type === 'tool_use' && p.state && p.state.status === 'error' && DENIED_RE.test(String(p.state.error))) state.denied = state.denied || checkboxName(p.tool);
   if (j.type === 'text' && p.text) out.push({ type: 'assistant', message: { content: [{ type: 'text', text: p.text }] } });
-  else if (j.type === 'tool_use') out.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: cap(p.tool), input: (p.state && p.state.input) || {} }] } });
-  else if (j.type === 'error') { state.failed = true; out.push({ type: 'error', text: errorText(j.error) }); }
+  else if (j.type === 'tool_use') out.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: checkboxName(p.tool), input: (p.state && p.state.input) || {} }] } });
+  else if (j.type === 'error') {
+    // An error event fails the run no matter what exit code follows.
+    state.failed = true;
+    const text = errorText(j.error);
+    state.error = state.error || text;
+    out.push({ type: 'error', text });
+  } else if (j.type && !state.unwarnedEventTypes.includes(j.type)) {
+    // Unknown event types stay out of the chat but are logged here, so the next upstream format drift is visible.
+    state.unwarnedEventTypes.push(j.type);
+    console.warn(`[opencode] unrecognized event type: ${j.type}`);
+  }
   return out;
 }
 
-// The closing events. A scripted run refuses a tool the agent may not use and the model often just stops, so say so.
+// The closing events. A scripted run refuses a tool the agent may not use and the model often just stops, so say so,
+// unless an upstream error already explains the failure (the error text wins, the guidance would only add noise).
 export function finish(state) {
   const out = [];
-  if (!state.sawText && !state.failed && state.denied) {
+  if (!state.sawText && state.denied && !state.error) {
     out.push({ type: 'assistant', message: { content: [{ type: 'text', text: `I am not allowed to use the ${state.denied} tool, so I could not do that. You can allow it in this agent's allowed tools.` }] } });
   }
-  out.push({ type: 'result', session_id: state.session, is_error: false });
+  out.push({ type: 'result', session_id: state.session, is_error: state.failed, ...(state.failed && state.error ? { result: state.error } : {}) });
   return out;
 }
