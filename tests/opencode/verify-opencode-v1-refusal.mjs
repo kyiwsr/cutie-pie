@@ -93,7 +93,7 @@ test('live: pointed at a 1.x binary, an opencode run is refused up front with th
     const oc = await liveFetch('/api/opencode').then((r) => r.json());
     assert.equal(oc.needsUpgrade, true);
     assert.match(oc.version || '', /1\.19\.0/);
-    const addRes = await liveFetch('/api/agents', { method: 'POST', body: JSON.stringify({ name: 'V1 Probe', role: 'probe', provider: 'opencode', model: 'opencode/nemotron-3-ultra-free', tools: 'Read' }) });
+    const addRes = await liveFetch('/api/agents', { method: 'POST', body: JSON.stringify({ name: 'V1 Probe', role: 'probe', provider: 'opencode', model: 'opencode/big-pickle', tools: 'Read' }) });
     assert.equal(addRes.status, 201);
     const rosterAgent = await addRes.json();
     try {

@@ -154,7 +154,7 @@ form.role.addEventListener('input', () => markPreset(form.role.value));
 // ---- provider and model: the list of models depends on who runs the agent ----
 const hint = $('mhint');
 const CLAUDE_MODELS = [['', 'Default (your Claude setting)'], ['haiku', 'Haiku (fastest)'], ['sonnet', 'Sonnet (balanced)'], ['opus', 'Opus (most capable)']];
-const RECOMMENDED_FREE = 'opencode/nemotron-3-ultra-free';
+const RECOMMENDED_FREE = 'opencode/big-pickle';
 let ocInfo = null;
 const loadOpencode = () => ocInfo || (ocInfo = fetch('/api/opencode').then((r) => r.json()).catch(() => ({ installed: false, models: [] })));
 async function fillModels(selected) {
