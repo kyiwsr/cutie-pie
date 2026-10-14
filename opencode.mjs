@@ -1,11 +1,17 @@
-// opencode as a second provider next to Claude Code. An agent set to "opencode" runs through `opencode run`, and its
+// opencode as a second provider next to Claude Code. An agent set to "opencode" runs through `opencode run`,
 // output is translated into the same events the chat already reads from Claude Code, so nothing else has to change.
 //
-// Two facts found by testing opencode 1.19:
-//  - Its free models (provider "opencode", ids ending in -free) reject a request when the bash tool is missing from it
-//    (HTTP 403 "free tier can only be used from within OpenCode"). So bash is never removed: when an agent may not use
-//    it, the tool is set to "ask", which a scripted run refuses automatically, and nothing can run.
-//  - Each agent's system prompt and permissions are passed as a config object in OPENCODE_CONFIG_CONTENT.
+// Two facts found by testing opencode V2:
+//  - Its free models (provider "opencode", ids ending in -free, plus big-pickle) reject a request when the shell action is missing
+//    from it (HTTP 403 "free tier can only be used from within OpenCode"). So shell is never denied: when an agent
+//    may not use it, the action is set to "ask", which a scripted run refuses automatically, and nothing can run.
+//  - The same free models reject a request when the read action is not allowed (same HTTP 403), even when shell is
+//    "ask". So a coordinator such as Master, which deliberately has no tools ticked because it only outputs
+//    <delegate> blocks, still gets read allowed: the system prompt already forbids it from using any tools, so the
+//    permission only satisfies the free-tier gate and changes nothing about its behavior.
+//  - Each agent's system prompt and permissions are passed as a native-V2 profile in OPENCODE_CONFIG_CONTENT
+//    (`agents` with `system` and `permissions[]`), and each run uses `--standalone` for a per-run private server,
+//    so no files are written anywhere and concurrent runs stay isolated.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -36,6 +42,32 @@ export function binary() {
   return 'opencode';
 }
 
+// Cutie Pie needs opencode V2: a 1.x binary cannot run the V2 profile
+// (`agents`/`system`/`permissions[]` with `--standalone`) and would fail
+// mysteriously mid-run, so runs are refused up front with this upgrade prompt.
+export const NPM_UPGRADE_CMD = 'npm install -g opencode-ai@latest';
+export const SCRIPT_UPGRADE_CMD = 'curl -fsSL https://opencode.ai/install | bash';
+export const OPENCODE_V2_DOCS = 'https://opencode.ai/v2/docs';
+
+export function majorOf(version) {
+  const m = String(version || '').match(/(?:^|\s)v?(\d+)(?:\.\d+)?(?:\.\d+)?/);
+  return m ? Number(m[1]) : null;
+}
+
+// Only a 1.x major version refuses: 2+ passes, and an unparseable version
+// fails open so a future format never blocks runs by mistake.
+export function needsUpgradeVersion(version) {
+  return majorOf(version) === 1;
+}
+
+export function upgradeMessage(version) {
+  const seen = String(version || '').trim();
+  return `This needs opencode 2, but found ${seen || 'opencode 1.x'}. Upgrade, then restart Cutie Pie:\n` +
+    `${NPM_UPGRADE_CMD}\n` +
+    `Other installs: ${SCRIPT_UPGRADE_CMD}\n` +
+    `See ${OPENCODE_V2_DOCS}`;
+}
+
 function run(args, timeout = 30000) {
   return new Promise((resolve) => {
     let out = '', p;
@@ -49,17 +81,24 @@ function run(args, timeout = 30000) {
 }
 
 // ---------- what is installed and which models are on offer ----------
-let modelCache = { at: 0, value: null };
+let modelCache = { at: 0, value: null, version: '', needsUpgrade: false };
 
 export async function info() {
-  if (modelCache.value && Date.now() - modelCache.at < 10 * 60 * 1000) return { installed: true, version: modelCache.version, models: modelCache.value };
+  if (modelCache.value && Date.now() - modelCache.at < 10 * 60 * 1000) return { installed: true, version: modelCache.version, needsUpgrade: modelCache.needsUpgrade, models: modelCache.value };
   const v = await run(['--version'], 15000);
-  if (v.code !== 0) return { installed: false, models: [] };
+  if (v.code !== 0) return { installed: false, models: [], needsUpgrade: false };
+  const version = v.out.trim();
+  const needsUpgrade = needsUpgradeVersion(version);
+  if (needsUpgrade) {
+    // Refuse up front: do not probe `models` on a 1.x binary (wrong format, slow, misleading).
+    modelCache = { at: Date.now(), value: [], version, needsUpgrade };
+    return { installed: true, version, needsUpgrade, models: [] };
+  }
   const m = await run(['models'], 60000);
   const models = m.out.split('\n').map((l) => l.trim()).filter((l) => /^[\w.-]+\/\S+$/.test(l))
     .map((id) => ({ id, free: /-free$/.test(id) || id === 'opencode/big-pickle' })); // no account needed for these
-  if (models.length) modelCache = { at: Date.now(), value: models, version: v.out.trim() };
-  return { installed: true, version: v.out.trim(), models };
+  if (models.length) modelCache = { at: Date.now(), value: models, version, needsUpgrade };
+  return { installed: true, version, needsUpgrade, models };
 }
 
 // ---------- opencode's own connectors (MCP servers), for the top bar when working without Claude ----------
@@ -82,34 +121,73 @@ export async function mcpServers() {
 }
 
 // ---------- one agent run ----------
-// Claude Code's tool names, as the Manage Agents list shows them, mapped to opencode's permission names.
+// Claude Code's tool names, as the Manage Agents list shows them, mapped to opencode's V2 action names.
+// Only V2 actions from the permissions table appear here: NotebookEdit and TodoWrite have no V2 action,
+// so they are hidden in Manage Agents for opencode and any stored values are ignored here (kept, not deleted).
+// Agent maps to the V2 subagent action (V1 called it task).
 const PERMS = {
-  read: ['Read'], list: ['Read'], glob: ['Glob'], grep: ['Grep'],
-  edit: ['Edit', 'Write'], write: ['Write'],
-  bash: ['Bash'], webfetch: ['WebFetch'], websearch: ['WebSearch'],
-  task: ['Agent'], skill: ['Skill'], todowrite: ['TodoWrite'], todoread: ['TodoWrite'],
+  read: ['Read'], glob: ['Glob'], grep: ['Grep'],
+  edit: ['Edit', 'Write'],
+  shell: ['Bash'], webfetch: ['WebFetch'], websearch: ['WebSearch'],
+  subagent: ['Agent'], skill: ['Skill'],
 };
+
+export function isFreeModel(model) {
+  const id = String(model || '');
+  return /-free$/.test(id) || id === 'opencode/big-pickle';
+}
 
 export function buildRun(agent, message, session, systemText) {
   const ticked = new Set(String(agent.tools || '').split(/,(?![^(]*\))/).map((t) => t.trim()).filter(Boolean));
-  const permission = {};
-  for (const [perm, names] of Object.entries(PERMS)) {
-    permission[perm] = names.some((n) => ticked.has(n)) ? 'allow' : perm === 'bash' ? 'ask' : 'deny';
+  // Free-tier gate: free models 403 unless read is allowed (verified: read-deny + shell-ask fails,
+  // read-allow without external_directory succeeds). Coordinators with no tools ticked get read allowed
+  // so they can run; their system prompt still forbids using any tools.
+  const readAllowed = ticked.has('Read') || isFreeModel(agent.model);
+  const permissions = [];
+  for (const [action, names] of Object.entries(PERMS)) {
+    if (action === 'read') {
+      permissions.push({ action, resource: '*', effect: readAllowed ? 'allow' : 'deny' });
+      continue;
+    }
+    permissions.push({ action, resource: '*', effect: names.some((n) => ticked.has(n)) ? 'allow' : action === 'shell' ? 'ask' : 'deny' });
   }
-  if (ticked.has('Read')) permission.external_directory = 'allow'; // Claude Code's Read tool reaches outside the folder too
-  const config = { agent: { cutie: { description: agent.name, mode: 'primary', prompt: systemText, permission } } };
-  const args = ['run', '--format', 'json', '--agent', 'cutie', '-m', agent.model];
-  if (agent.effort) args.push('--variant', agent.effort);
+  if (readAllowed) permissions.push({ action: 'external_directory', resource: '*', effect: 'allow' }); // Claude Code's Read tool reaches outside the folder too
+  const config = { agents: { cutie: { description: agent.name, mode: 'primary', system: systemText, permissions } } };
+  const args = ['run', '--standalone', '--format', 'json', '--agent', 'cutie', '-m', agent.model];
+  // Effort is a Claude-only setting: opencode V2 has no such flag, so it is never passed.
+  // The stored value is kept untouched so switching back to Claude restores prior behavior.
   if (/^ses_[A-Za-z0-9]+$/.test(session || '')) args.push('-s', session);
   args.push('--', message);
   return { cmd: binary(), args, env: { ...process.env, OPENCODE_CONFIG_CONTENT: JSON.stringify(config) } };
 }
 
 // ---------- opencode's events -> the events the chat understands ----------
+// V2 tool names are opencode actions (read, shell, subagent, …); the guidance below names them in the Manage Agents
+// (Claude Code) vocabulary the checkboxes use, so report the checkbox name, not the raw action.
 const cap = (s) => String(s || 'tool').replace(/^./, (c) => c.toUpperCase());
-const errorText = (e) => (e && e.data && e.data.message) || (e && e.name) || 'opencode failed';
+const checkboxName = (t) => {
+  const s = String(t || 'tool');
+  for (const names of Object.values(PERMS)) {
+    const hit = names.find((n) => n.toLowerCase() === s.toLowerCase());
+    if (hit) return hit;
+  }
+  for (const [action, names] of Object.entries(PERMS)) {
+    if (action === s.toLowerCase()) return names[0];
+  }
+  return cap(s);
+};
+// V2 error events carry { error: { type, message } }; keep the V1 fallbacks so old lines never go blank.
+const errorText = (e) => {
+  if (!e) return 'opencode failed';
+  if (typeof e === 'string') return e;
+  return e.message || (e.data && e.data.message) || e.name || 'opencode failed';
+};
+// A scripted run cannot approve an "ask" permission, so V2 rejects the tool call with this wording (V1 said
+// "rejected permission"). Either wording records the denial for the closing guidance. Kept narrow on purpose:
+// a tool's own OS errors (e.g. EACCES "permission denied") are not policy denials and must not match.
+const DENIED_RE = /rejected permission|request was rejected|cannot ask the user for permission/i;
 
-export function newState() { return { session: '', failed: false, sawText: false, denied: '' }; }
+export function newState() { return { session: '', failed: false, sawText: false, denied: '', error: '', unwarnedEventTypes: [] }; }
 
 export function translate(line, state) {
   let j;
@@ -118,19 +196,30 @@ export function translate(line, state) {
   if (j.sessionID && !state.session) { state.session = j.sessionID; out.push({ type: 'system', session_id: j.sessionID }); }
   const p = j.part || {};
   if (j.type === 'text' && p.text) state.sawText = true;
-  if (j.type === 'tool_use' && p.state && p.state.status === 'error' && /rejected permission/i.test(String(p.state.error))) state.denied = state.denied || cap(p.tool);
+  if (j.type === 'tool_use' && p.state && p.state.status === 'error' && DENIED_RE.test(String(p.state.error))) state.denied = state.denied || checkboxName(p.tool);
   if (j.type === 'text' && p.text) out.push({ type: 'assistant', message: { content: [{ type: 'text', text: p.text }] } });
-  else if (j.type === 'tool_use') out.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: cap(p.tool), input: (p.state && p.state.input) || {} }] } });
-  else if (j.type === 'error') { state.failed = true; out.push({ type: 'error', text: errorText(j.error) }); }
+  else if (j.type === 'tool_use') out.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: checkboxName(p.tool), input: (p.state && p.state.input) || {} }] } });
+  else if (j.type === 'error') {
+    // An error event fails the run no matter what exit code follows.
+    state.failed = true;
+    const text = errorText(j.error);
+    state.error = state.error || text;
+    out.push({ type: 'error', text });
+  } else if (j.type && !state.unwarnedEventTypes.includes(j.type)) {
+    // Unknown event types stay out of the chat but are logged here, so the next upstream format drift is visible.
+    state.unwarnedEventTypes.push(j.type);
+    console.warn(`[opencode] unrecognized event type: ${j.type}`);
+  }
   return out;
 }
 
-// The closing events. A scripted run refuses a tool the agent may not use and the model often just stops, so say so.
+// The closing events. A scripted run refuses a tool the agent may not use and the model often just stops, so say so,
+// unless an upstream error already explains the failure (the error text wins, the guidance would only add noise).
 export function finish(state) {
   const out = [];
-  if (!state.sawText && !state.failed && state.denied) {
+  if (!state.sawText && state.denied && !state.error) {
     out.push({ type: 'assistant', message: { content: [{ type: 'text', text: `I am not allowed to use the ${state.denied} tool, so I could not do that. You can allow it in this agent's allowed tools.` }] } });
   }
-  out.push({ type: 'result', session_id: state.session, is_error: false });
+  out.push({ type: 'result', session_id: state.session, is_error: state.failed, ...(state.failed && state.error ? { result: state.error } : {}) });
   return out;
 }

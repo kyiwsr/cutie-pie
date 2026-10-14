@@ -53,7 +53,7 @@ On Windows, use the native installer or WinGet above. Cutie Pie starts `claude` 
 
 ### Option B: opencode (free models)
 
-1. Install opencode: `npm install -g opencode-ai` (other methods are on <https://opencode.ai/docs>).
+1. Install opencode 2 or newer: `npm install -g opencode-ai@latest` (other methods are on <https://opencode.ai/v2/docs>).
 2. Restart Cutie Pie.
 3. On the login page, click **Continue without Claude (use opencode)**. If Claude Code is not installed, that is the only option shown.
 4. Open **Manage Agents**. If the first start happened without Claude, the starter team is already set to a free model. Otherwise open each agent, choose **Provider: opencode** and pick a model under **Free, no account needed**.
@@ -109,7 +109,8 @@ The strip shows each connected tool by name. To show a logo instead, put a squar
 |---|---|
 | "Claude Code is not installed" | Install it (Option A), or use opencode (Option B). |
 | The login page says to sign in but no window opens | Use the "Open the sign-in page" link, or run `claude auth login` in a terminal. |
-| "opencode is not installed" in Manage Agents | `npm install -g opencode-ai`, then restart Cutie Pie. If it is installed somewhere unusual, set `OPENCODE_BIN`. |
+| "opencode is not installed" in Manage Agents | `npm install -g opencode-ai@latest`, then restart Cutie Pie. If it is installed somewhere unusual, set `OPENCODE_BIN`. |
+| "This needs opencode 2" in chat or Manage Agents | You have opencode 1.x. Upgrade with `npm install -g opencode-ai@latest` or `curl -fsSL https://opencode.ai/install \| bash` (other methods are on <https://opencode.ai/v2/docs>), then restart Cutie Pie. |
 | The usage gauge says "unavailable" | It reads your Claude plan's usage, which Anthropic rate-limits, and it may not be available on every system (macOS keeps the Claude login in the Keychain). It is cosmetic. |
 | A blank page where the castle should be | The castle engine loads from the internet. Check your connection. |
 | "Address already in use" | Another copy is running. Close it, or start with `PORT=4531`. |
